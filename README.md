@@ -15,7 +15,7 @@ Un descargador de música de YouTube con Python que obtiene la mejor calidad y m
 
 ## 📦 Instalación
 
-### Instalación automática
+### Instalación automática (recomendada)
 ```bash
 chmod +x install.sh
 ./install.sh
@@ -23,8 +23,15 @@ chmod +x install.sh
 
 ### Instalación manual
 ```bash
+# Crear entorno virtual
+python3 -m venv venv
+
+# Activar entorno virtual
+source venv/bin/activate  # Linux/macOS
+# o en Windows: venv\Scripts\activate
+
 # Instalar dependencias
-pip3 install -r requirements.txt
+pip install -r requirements.txt
 
 # Instalar ffmpeg (Ubuntu/Debian)
 sudo apt install ffmpeg
@@ -33,10 +40,16 @@ sudo apt install ffmpeg
 brew install ffmpeg
 ```
 
+> **Nota:** Se recomienda usar entorno virtual para evitar conflictos con paquetes del sistema.
+
 ## 🎵 Uso
 
 ### Ejecutar el programa
 ```bash
+# Activar el entorno virtual (si no está activo)
+source venv/bin/activate
+
+# Ejecutar el programa
 python3 youtube_music_downloader.py
 ```
 
@@ -81,9 +94,20 @@ downloads/
 
 ## 🔧 Solución de problemas
 
+### Error: "Sign in to confirm you're not a bot" o "Signature extraction failed"
+```bash
+# Activar entorno virtual
+source venv/bin/activate
+
+# Actualizar yt-dlp a la última versión
+pip install --upgrade yt-dlp
+```
+
 ### Error: "yt-dlp not found"
 ```bash
-pip3 install --upgrade yt-dlp
+# Asegúrate de tener el entorno virtual activado
+source venv/bin/activate
+pip install --upgrade yt-dlp
 ```
 
 ### Error: "ffmpeg not found"

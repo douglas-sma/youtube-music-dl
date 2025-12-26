@@ -3,13 +3,23 @@
 echo "🎵 Configurando YouTube Music Downloader 🎵"
 echo "============================================"
 
+# Crear entorno virtual si no existe
+if [ ! -d "venv" ]; then
+    echo "📦 Creando entorno virtual..."
+    python3 -m venv venv
+fi
+
+# Activar entorno virtual
+echo "🔧 Activando entorno virtual..."
+source venv/bin/activate
+
 # Actualizar pip
 echo "📦 Actualizando pip..."
-python3 -m pip install --upgrade pip
+pip install --upgrade pip
 
 # Instalar dependencias de Python
 echo "📦 Instalando dependencias de Python..."
-pip3 install -r requirements.txt
+pip install -r requirements.txt
 
 # Verificar ffmpeg
 echo "🔧 Verificando ffmpeg..."
@@ -48,6 +58,10 @@ echo ""
 echo "✅ ¡Instalación completada!"
 echo ""
 echo "🚀 Para usar el descargador:"
+echo "   1. Activa el entorno virtual: source venv/bin/activate"
+echo "   2. Ejecuta: python3 youtube_music_downloader.py"
+echo "   3. Para desactivar el entorno: deactivate"
+echo ""
 echo "   python3 youtube_music_downloader.py"
 echo ""
 echo "💡 O hazlo ejecutable directamente:"
