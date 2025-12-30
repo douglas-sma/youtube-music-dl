@@ -477,31 +477,78 @@ class YouTubeMusicDownloader:
         title = info_dict.get('title', '')
         metadata['title'] = title
         
-        # Artista (puede estar en uploader o channel)
-        artist = info_dict.get('uploader', '') or info_dict.get('channel', '')
-        if ' - Topic' in artist:
-            artist = artist.replace(' - Topic', '')
+        # Artista - Prioridad de fuentes
+        artist = None
+        
+        # 1. Intentar obtener del campo 'artist' o 'creator' (más confiable y suele estar en romaji)
+        artist = info_dict.get('artist') or info_dict.get('creator')
+        
+        # 2. Si el artista tiene caracteres no latinos, buscar alternativa en 'alt_title' o 'track'
+        if artist and self.has_non_latin_chars(artist):
+            # Buscar en campos alternativos
+            alt_artist = info_dict.get('track') or info_dict.get('alt_title')
+            if alt_artist and ' - ' in alt_artist:
+                potential = alt_artist.split(' - ')[0].strip()
+                if not self.has_non_latin_chars(potential):
+                    artist = potential
+        
+        # 3. Si no hay, buscar en el título (formato: "Artista - Título")
+        if not artist and ' - ' in title:
+            parts = title.split(' - ', 1)
+            if len(parts) == 2:
+                potential_artist = parts[0].strip()
+                # Verificar que no sea solo el título de la canción
+                if len(potential_artist) < 50:
+                    artist = potential_artist
+        
+        # 4. Buscar en la descripción
+        if not artist or self.has_non_latin_chars(artist):
+            description = info_dict.get('description', '')
+            # Buscar patrones comunes
+            for pattern in ['Artist:', 'Artista:', 'By:', 'Por:']:
+                if pattern in description:
+                    lines = [line for line in description.split('\n') if pattern in line]
+                    if lines:
+                        potential = lines[0].split(pattern)[1].strip().split('\n')[0].split('•')[0].strip()
+                        if not self.has_non_latin_chars(potential):
+                            artist = potential
+                            break
+        
+        # 5. Usar uploader/channel como último recurso y limpiar
+        if not artist:
+            artist = info_dict.get('uploader', '') or info_dict.get('channel', '')
+        
+        # Limpiar el nombre del artista
+        artist = self.clean_artist_name(artist)
         metadata['artist'] = artist
         
-        # Álbum (intentar extraer de la descripción o título)
+        # Álbum
         album = info_dict.get('album')
         if not album:
             # Buscar en la descripción
             description = info_dict.get('description', '')
-            if 'Album:' in description:
-                album_line = [line for line in description.split('\n') if 'Album:' in line]
-                if album_line:
-                    album = album_line[0].split('Album:')[1].strip()
-            else:
-                # Usar el título como álbum si no hay otra información
-                album = title
+            for pattern in ['Album:', 'Álbum:']:
+                if pattern in description:
+                    lines = [line for line in description.split('\n') if pattern in line]
+                    if lines:
+                        album = lines[0].split(pattern)[1].strip().split('\n')[0].split('•')[0].strip()
+                        break
+            
+            # Si no se encontró, usar release_year si existe, sino el título
+            if not album:
+                album = info_dict.get('album') or title
+        
         metadata['album'] = album
         
-        # Fecha de lanzamiento
-        upload_date = info_dict.get('upload_date')
-        if upload_date:
-            year = upload_date[:4]
-            metadata['date'] = year
+        # Fecha de lanzamiento - priorizar release_year
+        release_year = info_dict.get('release_year')
+        if release_year:
+            metadata['date'] = str(release_year)
+        else:
+            upload_date = info_dict.get('upload_date')
+            if upload_date:
+                year = upload_date[:4]
+                metadata['date'] = year
         
         # Duración
         duration = info_dict.get('duration')
@@ -516,6 +563,92 @@ class YouTubeMusicDownloader:
         metadata['genre'] = genre
         
         return metadata
+    
+    def has_non_latin_chars(self, text):
+        """
+        Verifica si el texto contiene caracteres no latinos (japonés, chino, coreano, etc.)
+        
+        Args:
+            text (str): Texto a verificar
+        Returns:
+            bool: True si contiene caracteres no latinos
+        """
+        if not text:
+            return False
+        
+        for char in text:
+            # Rangos Unicode para japonés, chino, coreano
+            code = ord(char)
+            if (0x3040 <= code <= 0x309F or  # Hiragana
+                0x30A0 <= code <= 0x30FF or  # Katakana
+                0x4E00 <= code <= 0x9FFF or  # Kanji/Hanzi (CJK)
+                0xAC00 <= code <= 0xD7AF):   # Hangul (coreano)
+                return True
+        
+        return False
+    
+    def clean_artist_name(self, artist):
+        """
+        Limpia el nombre del artista removiendo sufijos comunes de canales
+        
+        Args:
+            artist (str): Nombre del artista sin limpiar
+        Returns:
+            str: Nombre limpio del artista
+        """
+        if not artist:
+            return 'Unknown Artist'
+        
+        # Patrones a remover
+        patterns_to_remove = [
+            ' - Topic',
+            ' Topic',
+            'VEVO',
+            ' Official',
+            ' Official Channel',
+            ' Official YouTube Channel',
+            ' Official Music Video',
+            ' Official Video',
+            ' Official Audio',
+            ' (Official)',
+            'Official ',
+        ]
+        
+        cleaned = artist
+        for pattern in patterns_to_remove:
+            cleaned = cleaned.replace(pattern, '')
+        
+        return cleaned.strip()
+    
+    def generate_clean_filename(self, metadata, original_path):
+        """
+        Genera un nombre de archivo limpio usando los metadatos mejorados
+        
+        Args:
+            metadata (dict): Metadatos mejorados
+            original_path (str): Ruta del archivo original
+        Returns:
+            str: Nueva ruta con nombre limpio
+        """
+        artist = metadata.get('artist', 'Unknown Artist')
+        title = metadata.get('title', 'Unknown Title')
+        
+        # Limpiar caracteres no válidos para nombres de archivo
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            artist = artist.replace(char, '')
+            title = title.replace(char, '')
+        
+        # Obtener directorio y extensión del archivo original
+        original_path = Path(original_path)
+        directory = original_path.parent
+        extension = original_path.suffix
+        
+        # Generar nuevo nombre
+        new_name = f"{artist} - {title}{extension}"
+        new_path = directory / new_name
+        
+        return str(new_path)
 
     def get_ydl_opts(self, format_type="best", single_video=False):
         """
@@ -525,6 +658,9 @@ class YouTubeMusicDownloader:
             format_type (str): "best", "mp3", "m4a", "flac"
             single_video (bool): Si True, evita descargar playlists completas
         """
+        # Detectar ruta de deno si está instalado
+        deno_path = os.path.expanduser("~/.deno/bin/deno")
+        
         base_opts = {
             'outtmpl': str(self.download_path / '%(uploader)s - %(title)s.%(ext)s'),
             'extractaudio': True,
@@ -537,6 +673,10 @@ class YouTubeMusicDownloader:
             'ignoreerrors': True,
             'noplaylist': single_video,  # Evita descargar playlists en canciones individuales
         }
+        
+        # Agregar deno como runtime de JavaScript si está disponible
+        if os.path.exists(deno_path):
+            base_opts['extractor_args'] = {'youtube': {'player_client': ['android'], 'js_runtime': [deno_path]}}
         
         # Configuración específica por formato
         if format_type == "best":
@@ -624,6 +764,15 @@ class YouTubeMusicDownloader:
                 # Escribir metadatos con mutagen
                 if os.path.exists(expected_filename):
                     self.write_metadata_to_file(expected_filename, enhanced_metadata, thumbnail_url)
+                    
+                    # Renombrar archivo con el artista limpio
+                    new_filename = self.generate_clean_filename(enhanced_metadata, expected_filename)
+                    if new_filename != expected_filename and not os.path.exists(new_filename):
+                        try:
+                            os.rename(expected_filename, new_filename)
+                            print(f"📝 Renombrado a: {Path(new_filename).name}")
+                        except Exception as e:
+                            print(f"⚠️ No se pudo renombrar: {e}")
                 
                 print("✅ Descarga completada!")
                 
@@ -652,61 +801,44 @@ class YouTubeMusicDownloader:
             url = thumb.get('url', '')
             print(f"  {i+1}. {thumb_id} ({width}x{height}) {url[:50]}...")
         
-        # Prioridades de thumbnails (de mejor a peor para portadas musicales)
-        # Evitar maxresdefault que suele tener elementos promocionales
+        # Priorizar thumbnails por resolución (de mayor a menor)
+        # Primero intentar obtener la mejor calidad disponible
         preferred_patterns = [
-            'hqdefault',      # Suele ser más limpio
-            'mqdefault',      # Calidad media pero limpio
-            'sddefault',      # Calidad estándar
-            'default',        # Básico pero sin elementos extra
-            'maxresdefault'   # Último recurso (alta calidad pero con elementos)
+            'maxresdefault',  # 1920x1080 - Máxima calidad
+            'maxres',         # Alternativa para maxresdefault
+            'hq720',          # 1280x720 - Alta calidad
+            'sddefault',      # 640x480 - Calidad estándar
+            'hqdefault',      # 480x360 - Calidad media-alta
+            'mqdefault',      # 320x180 - Calidad media
+            'default',        # 120x90 - Baja calidad (último recurso)
         ]
         
-        # Buscar thumbnails cuadrados o casi cuadrados primero (mejor para portadas)
-        square_thumbnails = []
-        clean_thumbnails = []
-        
-        for thumb in thumbnails:
-            width = thumb.get('width', 0)
-            height = thumb.get('height', 0)
-            thumb_id = thumb.get('id', '')
-            
-            if width > 0 and height > 0:
-                ratio = width / height
-                # Considerar "cuadrado" si la relación está entre 0.85 y 1.15
-                if 0.85 <= ratio <= 1.15:
-                    square_thumbnails.append(thumb)
-                # También guardar thumbnails que podrían ser limpios
-                for pattern in preferred_patterns:
-                    if pattern in thumb_id and thumb not in clean_thumbnails:
-                        clean_thumbnails.append(thumb)
-        
-        # 1. Priorizar thumbnails cuadrados medianos (no demasiado grandes)
-        if square_thumbnails:
-            # Ordenar por tamaño, preferir medianos (300-800px)
-            square_thumbnails.sort(key=lambda x: abs(x.get('width', 0) - 500))
-            best_square = square_thumbnails[0]
-            thumb_id = best_square.get('id', 'square')
-            print(f"✅ Seleccionado thumbnail cuadrado: {thumb_id}")
-            return best_square.get('url')
-        
-        # 2. Buscar por patrones preferidos (evitando maxres)
-        for pattern in preferred_patterns[:-1]:  # Excluir maxresdefault inicialmente
+        # 1. Buscar el thumbnail de mayor resolución disponible
+        for pattern in preferred_patterns:
             for thumb in thumbnails:
-                thumb_id = thumb.get('id', '')
-                if pattern in thumb_id:
-                    print(f"✅ Seleccionado thumbnail por patrón: {thumb_id}")
+                thumb_id = thumb.get('id', '').lower()
+                thumb_url = thumb.get('url', '').lower()
+                
+                # Buscar tanto en el ID como en la URL
+                if pattern in thumb_id or pattern in thumb_url:
+                    width = thumb.get('width', 'unknown')
+                    height = thumb.get('height', 'unknown')
+                    print(f"✅ Seleccionado thumbnail de alta resolución: {pattern} ({width}x{height})")
                     return thumb.get('url')
         
-        # 3. Si no encontramos nada, usar uno de tamaño medio
-        medium_thumbnails = [t for t in thumbnails if 200 <= t.get('width', 0) <= 600]
-        if medium_thumbnails:
-            best_medium = medium_thumbnails[0]
-            thumb_id = best_medium.get('id', 'medium')
-            print(f"✅ Seleccionado thumbnail medio: {thumb_id}")
-            return best_medium.get('url')
+        # 2. Si no encontramos por patrón, buscar el de mayor resolución por tamaño
+        thumbnails_with_size = [t for t in thumbnails if t.get('width', 0) > 0 and t.get('height', 0) > 0]
+        if thumbnails_with_size:
+            # Ordenar por área (width * height) de mayor a menor
+            thumbnails_with_size.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
+            best_thumb = thumbnails_with_size[0]
+            width = best_thumb.get('width', 0)
+            height = best_thumb.get('height', 0)
+            thumb_id = best_thumb.get('id', 'best_size')
+            print(f"✅ Seleccionado thumbnail por tamaño: {thumb_id} ({width}x{height})")
+            return best_thumb.get('url')
         
-        # 4. Último recurso: el primero disponible
+        # 3. Último recurso: el primero disponible
         if thumbnails:
             fallback = thumbnails[0]
             thumb_id = fallback.get('id', 'fallback')
